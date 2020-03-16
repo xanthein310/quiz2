@@ -33,6 +33,36 @@ typedef union {
     };
 } xs;
 
+struct ref_count {
+    size_t count;
+    char data_[1];
+};
+
+struct ref_count *get_rc(char *ptr)
+{
+    return (struct ref_count *)((void *)ptr - offsetof(struct ref_count, data_));
+}
+
+void *rc_create(size_t size)
+{
+    struct ref_count *rc = malloc(offsetof(struct ref_count, data_) + size);
+
+    rc->count = 1;
+    return rc->data_;
+}
+
+void rc_inc(char *ptr)
+{
+    get_rc(ptr)->count++;
+}
+
+void rc_dec(char *ptr)
+{
+    struct ref_count *rc = get_rc(ptr);
+    if(--rc->count == 0)
+        free(rc);
+}
+
 static inline bool xs_is_ptr(const xs *x) { return x->is_ptr; }
 static inline size_t xs_size(const xs *x)
 {
@@ -181,6 +211,11 @@ xs *xs_trim(xs *x, const char *trimset)
     return x;
 #undef check_bit
 #undef set_bit
+}
+
+void xs_copy(xs *dst, xs *src)
+{
+
 }
 
 #include <stdio.h>
