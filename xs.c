@@ -116,12 +116,18 @@ xs *xs_grow(xs *x, size_t len)
     if (len <= xs_capacity(x))
         return x;
     len = ilog2(len) + 1;
-    if (xs_is_ptr(x))
-        x->ptr = realloc(x->ptr, (size_t) 1 << len);
+    if (xs_is_ptr(x)) {
+        if (get_rc(x->ptr)->count == 1)
+            x->ptr = realloc(x->ptr, (size_t) 1 << len);
+        else {
+            rc_dec(x->ptr);
+            x->ptr = rc_create((size_t) 1 << len);
+        }
+    }
     else {
         char buf[16];
         memcpy(buf, x->data, 16);
-        x->ptr = malloc((size_t) 1 << len);
+        x->ptr = rc_create((size_t) 1 << len);
         memcpy(x->ptr, buf, 16);
     }
     x->is_ptr = true;
@@ -153,13 +159,21 @@ xs *xs_concat(xs *string, const xs *prefix, const xs *suffix)
            size = xs_size(string), capacity = xs_capacity(string);
 
     char *pre = xs_data(prefix), *suf = xs_data(suffix),
-         *data = xs_data(string);
+         *data = xs_data(string), *data_dst = data;
 
     if (size + pres + sufs <= capacity) {
-        memmove(data + pres, data, size);
-        memcpy(data, pre, pres);
-        memcpy(data + pres + size, suf, sufs + 1);
-        string->space_left = 15 - (size + pres + sufs);
+        if (xs_is_ptr(string) && get_rc(data)->count > 1) {
+            rc_dec(data);
+            string->ptr = rc_create((size_t) 1 << string->capacity);
+            data_dst = string->ptr;
+        }
+        memmove(data_dst + pres, data, size);
+        memcpy(data_dst, pre, pres);
+        memcpy(data_dst + pres + size, suf, sufs + 1);
+        if (xs_is_ptr(string))
+            string->size = size + pres + sufs;
+        else
+            string->space_left = 15 - (size + pres + sufs);
     } else {
         xs tmps = xs_literal_empty();
         xs_grow(&tmps, size + pres + sufs);
@@ -204,7 +218,14 @@ xs *xs_trim(xs *x, const char *trimset)
      * Do not reallocate immediately. Instead, reuse it as possible.
      * Do not shrink to in place if < 16 bytes.
      */
-    memmove(orig, dataptr, slen);
+    if (!xs_is_ptr(x) || xs_is_ptr(x) & get_rc(orig)->count == 1)
+        memmove(orig, dataptr, slen);
+    else {
+        rc_dec(orig);
+        x->ptr = rc_create((size_t) 1 << x->capacity);
+        memcpy(x->ptr, dataptr, slen);
+        orig = xs_data(x);
+    }
     /* do not dirty memory unless it is needed */
     if (orig[slen])
         orig[slen] = 0;
