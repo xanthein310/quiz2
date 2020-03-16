@@ -90,7 +90,7 @@ xs *xs_new(xs *x, const void *p)
         x->capacity = ilog2(len) + 1;
         x->size = len - 1;
         x->is_ptr = true;
-        x->ptr = malloc((size_t) 1 << x->capacity);
+        x->ptr = rc_create((size_t) 1 << x->capacity);
         memcpy(x->ptr, p, len);
     } else {
         memcpy(x->data, p, len);
@@ -137,8 +137,13 @@ static inline xs *xs_newempty(xs *x)
 
 static inline xs *xs_free(xs *x)
 {
-    if (xs_is_ptr(x))
-        free(xs_data(x));
+    if (xs_is_ptr(x)) {
+        struct ref_count *rc = get_rc(xs_data(x));
+        if (rc->count == 1)
+            free(rc);
+        else
+            rc_dec(xs_data(x));
+    }
     return xs_newempty(x);
 }
 
@@ -215,7 +220,18 @@ xs *xs_trim(xs *x, const char *trimset)
 
 void xs_copy(xs *dst, xs *src)
 {
+    if (!dst || !src)
+        return;
 
+    if (xs_is_ptr(src)) {
+        dst->ptr = src->ptr;
+        dst->is_ptr = src->is_ptr;
+        dst->size = src->size;
+        dst->capacity = src->capacity;
+        rc_inc(src->ptr);
+    } else {
+        memcpy(dst->data, src->data, xs_size(src));
+    }
 }
 
 #include <stdio.h>
